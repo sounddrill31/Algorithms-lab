@@ -1,0 +1,56 @@
+name: Compile C and Create Releases
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v46
+      with:
+        files: '**/*.c' # Only consider C files
+
+    - name: Compile and release
+      if: steps.changed-files.outputs.modified_files != '' || steps.changed-files.outputs.added_files != ''
+      run: |
+        for file in ${{ steps.changed-files.outputs.modified_files }} ${{ steps.changed-files.outputs.added_files }}; do
+          filename=$(basename "$file" .c)
+          binary_name="$filename"
+          
+          # Compile the C file
+          gcc "$file" -o "$binary_name"
+          
+          # Create a release based on the filename and tag
+          # Assuming format: a-1-selectionsort.c -> Selection Sort (Part A Q1)
+          # Adjust the release_name logic to fit your specific needs
+          
+          # Remove ".c" extension and convert filename to title
+          release_title=$(echo "$filename" | sed -E 's/(.*)-(.*)-(.*)/\u\1 \u\2 (\u\3)/g' | sed 's/-/ /g')
+
+          # Check if a release with this tag already exists
+          existing_release=$(gh release view "$filename" --json id,url -q '{"id":.id,"url":.url}' 2>/dev/null)
+
+          if [ -z "$existing_release" ]; then
+            # Create a new release if it doesn't exist
+            gh release create "$filename" \
+              --title "$release_title" \
+              --notes "Compiled binary for $file" \
+              "$binary_name" # Attach the compiled binary as a release asset
+          else
+            # Upload to existing release if it does
+            # gh release upload "$filename" "$binary_name" --clobber # Use --clobber if you want to overwrite existing assets
+            echo "Release with tag '$filename' already exists. Skipping upload to avoid overwriting.  Consider using --clobber if overwriting is desired." 
+            # If you want to update the release (e.g. edit release notes, replace asset) you'll need to use more advanced gh CLI commands. 
+          fi
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Necessary for creating releases
