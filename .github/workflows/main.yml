@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      buildall:
+        description: 'Set to true to build all .c files in the repository'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-and-release:
@@ -15,45 +22,59 @@ jobs:
 
     - name: Get changed files
       id: changed-files
+      if: ${{ github.event_name != 'workflow_dispatch' || !inputs.buildall }}
       uses: tj-actions/changed-files@v46
       with:
-        files: '**/*.c' # Only consider C files
+        files: '**/*.c' '**/*.c' # Only consider C files
+
+    - name: Get all C files (if building all)
+      id: all-c-files
+      if: ${{ github.event_name == 'workflow_dispatch' && inputs.buildall }}
+      run: |
+        find . -name "*.c" -print0 | tr '\0' '\n' | xargs -rI {} echo "{}" >> "$GITHUB_OUTPUT"
+      #  Explanation:
+      #  - find . -name "*.c" -print0 : Finds all .c files and prints them null-terminated.
+      #  - tr '\0' '\n' : Converts null terminators to newlines.
+      #  - xargs -rI {} echo "{}" >> "$GITHUB_OUTPUT" : Iterates through each file path and appends it to the workflow output.
 
     - name: Compile and release
-      if: steps.changed-files.outputs.modified_files != '' || steps.changed-files.outputs.added_files != ''
       run: |
-        for file in ${{ steps.changed-files.outputs.modified_files }} ${{ steps.changed-files.outputs.added_files }}; do
+        # Determine the list of files to compile
+        files_to_compile=""
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.buildall }}" == "true" ]]; then
+          # Trim leading "./" from file paths if necessary
+          files_to_compile=$(find . -name "*.c" -print | sed 's/^\.\///')
+        else
+          files_to_compile="${{ steps.changed-files.outputs.modified_files }} ${{ steps.changed-files.outputs.added_files }}"
+        fi
+
+        for file in $files_to_compile; do
+          if [[ -z "$file" ]]; then
+            continue # Skip empty entries
+          fi
+
           filename=$(basename "$file" .c)
           binary_name="$filename"
           
           # Compile the C file with verbose output and error handling
           if ! gcc -Wall -Wextra -g "$file" -o "$binary_name"; then
             echo "Error: Compilation failed for $file. Check the logs for details."
-            exit 1 # Exit the job with a non-zero code to indicate failure
+            exit 1
           fi
           
           # Create a release based on the filename and tag
-          # Assuming format: a-1-selectionsort.c -> Selection Sort (Part A Q1)
-          # Adjust the release_name logic to fit your specific needs
-          
-          # Remove ".c" extension and convert filename to title
           release_title=$(echo "$filename" | sed -E 's/(.*)-(.*)-(.*)/\u\1 \u\2 (\u\3)/g' | sed 's/-/ /g')
 
-          # Check if a release with this tag already exists
           existing_release=$(gh release view "$filename" --json id,url -q '{"id":.id,"url":.url}' 2>/dev/null)
 
           if [ -z "$existing_release" ]; then
-            # Create a new release if it doesn't exist
             gh release create "$filename" \
               --title "$release_title" \
               --notes "Compiled binary for $file" \
-              "$binary_name" # Attach the compiled binary as a release asset
+              "$binary_name"
           else
-            # Upload to existing release if it does
-            # gh release upload "$filename" "$binary_name" --clobber # Use --clobber if you want to overwrite existing assets
-            echo "Release with tag '$filename' already exists. Skipping upload to avoid overwriting.  Consider using --clobber if overwriting is desired." 
-            # If you want to update the release (e.g. edit release notes, replace asset) you'll need to use more advanced gh CLI commands. 
+            echo "Release with tag '$filename' already exists. Skipping upload to avoid overwriting. Consider using --clobber if overwriting is desired." 
           fi
         done
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Necessary for creating releases
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
