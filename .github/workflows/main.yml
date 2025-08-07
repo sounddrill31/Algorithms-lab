@@ -26,8 +26,11 @@ jobs:
           filename=$(basename "$file" .c)
           binary_name="$filename"
           
-          # Compile the C file
-          gcc "$file" -o "$binary_name"
+          # Compile the C file with verbose output and error handling
+          if ! gcc -Wall -Wextra -g "$file" -o "$binary_name"; then
+            echo "Error: Compilation failed for $file. Check the logs for details."
+            exit 1 # Exit the job with a non-zero code to indicate failure
+          fi
           
           # Create a release based on the filename and tag
           # Assuming format: a-1-selectionsort.c -> Selection Sort (Part A Q1)
