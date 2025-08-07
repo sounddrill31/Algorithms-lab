@@ -31,11 +31,10 @@ jobs:
       id: all-c-files
       if: ${{ github.event_name == 'workflow_dispatch' && inputs.buildall }}
       run: |
-        find . -name "*.c" -print0 | tr '\0' '\n' | xargs -rI {} echo "{}" >> "$GITHUB_OUTPUT"
-      #  Explanation:
-      #  - find . -name "*.c" -print0 : Finds all .c files and prints them null-terminated.
-      #  - tr '\0' '\n' : Converts null terminators to newlines.
-      #  - xargs -rI {} echo "{}" >> "$GITHUB_OUTPUT" : Iterates through each file path and appends it to the workflow output.
+        # Collect all C file paths and join them into a single space-separated string
+        all_c_files=$(find . -name "*.c" -print | sed 's/^\.\///' | tr '\n' ' ')
+        # Set the output variable
+        echo "files=$all_c_files" >> "$GITHUB_OUTPUT"
 
     - name: Compile and release
       run: |
