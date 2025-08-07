@@ -5,12 +5,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      buildall:
-        description: 'Set to true to build all .c files in the repository'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build-and-release:
@@ -20,60 +14,43 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Get changed files
-      id: changed-files
-      if: ${{ github.event_name != 'workflow_dispatch' || !inputs.buildall }}
-      uses: tj-actions/changed-files@v46
-      with:
-        files: '**/*.c' # Only consider C files
-
-    - name: Get all C files (if building all)
-      id: all-c-files
-      if: ${{ github.event_name == 'workflow_dispatch' && inputs.buildall }}
+    - name: Compile all C files and create/update releases
       run: |
-        # Collect all C file paths and join them into a single space-separated string
-        all_c_files=$(find . -name "*.c" -print | sed 's/^\.\///' | tr '\n' ' ')
-        # Set the output variable
-        echo "files=$all_c_files" >> "$GITHUB_OUTPUT"
+        files_to_compile=$(find . -name "*.c" -print | sed 's/^\.\///' | sort)
 
-    - name: Compile and release
-      run: |
-        # Determine the list of files to compile
-        files_to_compile=""
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.buildall }}" == "true" ]]; then
-          # Trim leading "./" from file paths if necessary
-          files_to_compile=$(find . -name "*.c" -print | sed 's/^\.\///')
-        else
-          files_to_compile="${{ steps.changed-files.outputs.modified_files }} ${{ steps.changed-files.outputs.added_files }}"
+        if [[ -z "$files_to_compile" ]]; then
+          echo "No C files found to compile. Exiting."
+          exit 0
         fi
 
         for file in $files_to_compile; do
-          if [[ -z "$file" ]]; then
-            continue # Skip empty entries
-          fi
-
           filename=$(basename "$file" .c)
           binary_name="$filename"
-          
-          # Compile the C file with verbose output and error handling
+
+          echo "--- Processing: $file ---"
+
           if ! gcc -Wall -Wextra -g "$file" -o "$binary_name"; then
             echo "Error: Compilation failed for $file. Check the logs for details."
             exit 1
           fi
-          
-          # Create a release based on the filename and tag
+          echo "Successfully compiled $file into $binary_name"
+
           release_title=$(echo "$filename" | sed -E 's/(.*)-(.*)-(.*)/\u\1 \u\2 (\u\3)/g' | sed 's/-/ /g')
 
-          existing_release=$(gh release view "$filename" --json id,url -q '{"id":.id,"url":.url}' 2>/dev/null)
+          existing_release_tag=$(gh release list --json tagName -q '.[].tagName' | grep -E "^$filename$")
 
-          if [ -z "$existing_release" ]; then
+          if [ -z "$existing_release_tag" ]; then
+            echo "Creating new release '$filename'..."
             gh release create "$filename" \
               --title "$release_title" \
               --notes "Compiled binary for $file" \
               "$binary_name"
+            echo "Release '$filename' created."
           else
-            echo "Release with tag '$filename' already exists. Skipping upload to avoid overwriting. Consider using --clobber if overwriting is desired." 
+            echo "Release '$filename' already exists. Updating binary asset..."
+            gh release upload "$filename" "$binary_name" --clobber
+            echo "Binary asset for release '$filename' updated."
           fi
-        done
+          echo "--- Finished processing: $file ---"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
