@@ -25,7 +25,7 @@ jobs:
       if: ${{ github.event_name != 'workflow_dispatch' || !inputs.buildall }}
       uses: tj-actions/changed-files@v46
       with:
-        files: '**/*.c' '**/*.c' # Only consider C files
+        files: '**/*.c' # Only consider C files
 
     - name: Get all C files (if building all)
       id: all-c-files
